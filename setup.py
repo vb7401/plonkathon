@@ -74,7 +74,7 @@ class Setup(object):
 
 
     # Generate the verification key for this program with the given setup
-    def verification_key(self, pk: CommonPreprocessedInput) -> VerificationKey:
+    def verification_key(self, pk: CommonPreprocessedInput, blind=False) -> VerificationKey:
         # Create the appropriate VerificationKey object
         vk = VerificationKey(
             group_order = pk.group_order,
@@ -87,7 +87,8 @@ class Setup(object):
             S2 = self.commit(pk.S2),
             S3 = self.commit(pk.S3),
             X_2 = self.X2,
-            w = Scalar.root_of_unity(2**ceil(log2(len(pk.QM.values))))
+            w = Scalar.root_of_unity(2**ceil(log2(len(pk.QM.values) + 5 * blind))),
+            blind = blind
         )
 
         return vk

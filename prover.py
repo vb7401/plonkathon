@@ -94,6 +94,16 @@ class Prover:
         if None not in witness:
             witness[None] = 0
 
+        A_i, B_i, C_i = [Scalar(0)] * group_order, [Scalar(0)] * group_order, [Scalar(0)] * group_order
+        for i, wires in enumerate(program.wires()):
+            A_i[i] = Scalar(witness[wires.L])
+            B_i[i] = Scalar(witness[wires.R])
+            C_i[i] = Scalar(witness[wires.O])
+
+        self.A = Polynomial(A_i, Basis.LAGRANGE)
+        self.B = Polynomial(B_i, Basis.LAGRANGE)
+        self.C = Polynomial(C_i, Basis.LAGRANGE)
+
         # Sanity check that witness fulfils gate constraints
         assert (
             self.A * self.pk.QL
@@ -103,7 +113,9 @@ class Prover:
             + self.PI
             + self.pk.QC
             == Polynomial([Scalar(0)] * group_order, Basis.LAGRANGE)
-        )
+        ), "witnes does not satisfy gate constraints"
+
+        a_1, b_1, c_1 = setup.commit(self.A), setup.commit(self.B), setup.commit(self.C)
 
         # Return a_1, b_1, c_1
         return Message1(a_1, b_1, c_1)
@@ -111,6 +123,19 @@ class Prover:
     def round_2(self) -> Message2:
         group_order = self.group_order
         setup = self.setup
+        roots_of_unity = Scalar.roots_of_unity(group_order)
+
+        Z_values = [Scalar(1)] * (group_order+1)
+        for i in range(1, group_order+1):
+            Z_values[i] = Z_values[i-1] * (
+                self.rlc(self.A.values[i-1], roots_of_unity[i-1]) *
+                self.rlc(self.B.values[i-1], 2*roots_of_unity[i-1]) *
+                self.rlc(self.C.values[i-1], 3*roots_of_unity[i-1])
+            ) / (
+                self.rlc(self.A.values[i-1], self.pk.S1.values[i-1]) *
+                self.rlc(self.B.values[i-1], self.pk.S2.values[i-1]) *
+                self.rlc(self.C.values[i-1], self.pk.S3.values[i-1])
+            )
 
         # Check that the last term Z_n = 1
         assert Z_values.pop() == 1
@@ -128,6 +153,9 @@ class Prover:
             ) * Z_values[
                 (i + 1) % group_order
             ] == 0
+
+        self.Z = Polynomial(Z_values, Basis.LAGRANGE)
+        z_1 = setup.commit(self.Z)
 
         # Return z_1
         return Message2(z_1)

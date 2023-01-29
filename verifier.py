@@ -31,6 +31,8 @@ class VerificationKey:
     X_2: G2Point
     # nth root of unity, where n is the program's group order.
     w: Scalar
+    # blinding
+    blind: bool
 
     # More optimized version that tries hard to minimize pairings and
     # elliptic curve multiplications, but at the cost of being harder
