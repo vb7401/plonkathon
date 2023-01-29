@@ -163,6 +163,11 @@ class Polynomial:
             Basis.LAGRANGE,
         )
 
+    def standard_eval(self, x: Scalar):
+        assert self.basis == Basis.MONOMIAL
+
+        return sum([x**i * v for (i, v) in enumerate(self.values)])
+
     # Given a polynomial expressed as a list of evaluations at roots of unity,
     # evaluate it at x directly, without using an FFT to covert to coeffs first
     def barycentric_eval(self, x: Scalar):

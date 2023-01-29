@@ -122,7 +122,7 @@ class Prover:
 
     def round_2(self) -> Message2:
         group_order = self.group_order
-        setup = self.setup
+        setup = self.setup        
         roots_of_unity = Scalar.roots_of_unity(group_order)
 
         Z_values = [Scalar(1)] * (group_order+1)
@@ -163,53 +163,193 @@ class Prover:
     def round_3(self) -> Message3:
         group_order = self.group_order
         setup = self.setup
+        fft_cofactor = self.fft_cofactor
 
-        # Expand L0 into the coset extended Lagrange basis
+        # Expand all polynomials into the coset extended Lagrange basis
         L0_big = self.fft_expand(
             Polynomial([Scalar(1)] + [Scalar(0)] * (group_order - 1), Basis.LAGRANGE)
         )
+        ZH_big = Polynomial(
+            [Scalar(-1)] +
+            [Scalar(0)] * (group_order - 1) +
+            [fft_cofactor**group_order] +
+            [Scalar(0)] * (group_order*3 - 1),
+            Basis.MONOMIAL
+        ).fft()
+        X_big = self.fft_expand(
+            Polynomial(Scalar.roots_of_unity(group_order), Basis.LAGRANGE)
+        )
+        a_big = self.fft_expand(self.A)
+        b_big = self.fft_expand(self.B)
+        c_big = self.fft_expand(self.C)
+        Qm_big = self.fft_expand(self.pk.QM)
+        Ql_big = self.fft_expand(self.pk.QL)
+        Qr_big = self.fft_expand(self.pk.QR)
+        Qo_big = self.fft_expand(self.pk.QO)
+        Qc_big = self.fft_expand(self.pk.QC)
+        PI_big = self.fft_expand(self.PI)
+        S1_big = self.fft_expand(self.pk.S1)
+        S2_big = self.fft_expand(self.pk.S2)
+        S3_big = self.fft_expand(self.pk.S3)
+        Z_big = self.fft_expand(self.Z)
+        Zw_big = self.fft_expand(Polynomial(
+            self.Z.values[1:] + [self.Z.values[0]],
+            Basis.LAGRANGE
+        ))
 
+        # constraint check
+        T_constraint = (
+            a_big * b_big * Qm_big +
+            a_big * Ql_big +
+            b_big * Qr_big +
+            c_big * Qo_big +
+            PI_big +
+            Qc_big
+        );
+
+        # grand product computation check
+        T_gp_comp = (
+            (
+                self.rlc_poly(a_big, X_big) *
+                self.rlc_poly(b_big, X_big*Scalar(2)) *
+                self.rlc_poly(c_big, X_big*Scalar(3)) *
+                Z_big
+            ) - (
+                self.rlc_poly(a_big, S1_big) *
+                self.rlc_poly(b_big, S2_big) *
+                self.rlc_poly(c_big, S3_big) *
+                Zw_big
+            )
+        ) * self.alpha;
+
+        # grand product is equal check
+        T_gp_equal = (
+            (Z_big - Scalar(1)) * L0_big
+        ) * self.alpha * self.alpha;
+
+        # division
+        QUOT_big = (T_constraint + T_gp_comp + T_gp_equal) / ZH_big;
+        T_coeffs = self.expanded_evals_to_coeffs(QUOT_big).values
+        
         # Sanity check: QUOT has degree < 3n
         assert (
-            self.expanded_evals_to_coeffs(QUOT_big).values[-group_order:]
+            T_coeffs[-group_order:]
             == [0] * group_order
         )
         print("Generated the quotient polynomial")
 
+        # Compute T1, T2, T3
+        self.T1 = Polynomial(T_coeffs[:group_order], Basis.MONOMIAL)
+        self.T2 = Polynomial(T_coeffs[group_order:2*group_order], Basis.MONOMIAL)
+        self.T3 = Polynomial(T_coeffs[2*group_order:3*group_order], Basis.MONOMIAL)
+
         # Sanity check that we've computed T1, T2, T3 correctly
         assert (
-            T1.barycentric_eval(fft_cofactor)
-            + T2.barycentric_eval(fft_cofactor) * fft_cofactor**group_order
-            + T3.barycentric_eval(fft_cofactor) * fft_cofactor ** (group_order * 2)
+            self.T1.standard_eval(fft_cofactor)
+            + self.T2.standard_eval(fft_cofactor) * fft_cofactor**group_order
+            + self.T3.standard_eval(fft_cofactor) * fft_cofactor**(group_order * 2)
         ) == QUOT_big.values[0]
 
         print("Generated T1, T2, T3 polynomials")
+
+        t_lo_1 = setup.commit_monomial(self.T1)
+        t_mid_1 = setup.commit_monomial(self.T2)
+        t_hi_1 = setup.commit_monomial(self.T3)
 
         # Return t_lo_1, t_mid_1, t_hi_1
         return Message3(t_lo_1, t_mid_1, t_hi_1)
 
     def round_4(self) -> Message4:
+        zeta = self.zeta 
+
+        self.a_eval = self.A.barycentric_eval(zeta)
+        self.b_eval = self.B.barycentric_eval(zeta)
+        self.c_eval = self.C.barycentric_eval(zeta)
+        self.s1_eval = self.pk.S1.barycentric_eval(zeta)
+        self.s2_eval = self.pk.S2.barycentric_eval(zeta)
+        self.z_shifted_eval = self.Z.barycentric_eval(zeta * Scalar.root_of_unity(self.group_order))
 
         # Return a_eval, b_eval, c_eval, s1_eval, s2_eval, z_shifted_eval
-        return Message4(a_eval, b_eval, c_eval, s1_eval, s2_eval, z_shifted_eval)
+        return Message4(self.a_eval, self.b_eval, self.c_eval, self.s1_eval, self.s2_eval, self.z_shifted_eval)
 
     def round_5(self) -> Message5:
+        zeta = self.zeta
+        v = self.v
+
+        # more zeta evaluations
+        zh_eval = Polynomial( 
+            [Scalar(-1)] +
+            [Scalar(0)] * (self.group_order - 1) +
+            [Scalar(1)],
+            Basis.MONOMIAL
+        ).standard_eval(zeta)
+
+        l1_eval = Polynomial(
+            [Scalar(1)] + [Scalar(0)] * (self.group_order - 1),
+            Basis.LAGRANGE
+        ).barycentric_eval(zeta)
+
+        # compute constraint part of R
+        R_constraint = (
+            self.pk.QM * self.a_eval * self.b_eval +
+            self.pk.QL * self.a_eval +
+            self.pk.QR * self.b_eval +
+            self.pk.QO * self.c_eval +
+            self.PI + 
+            self.pk.QC
+        )
+
+        # compute grand product check
+        R_gp_comp = (
+            ((self.Z) * 
+                self.rlc(self.a_eval, zeta) *
+                self.rlc(self.b_eval, 2 * zeta) *  
+                self.rlc(self.c_eval, 3 * zeta)) - 
+            ((self.pk.S3 * self.beta + self.c_eval + self.gamma) *
+                self.z_shifted_eval *
+                self.rlc(self.a_eval, self.s1_eval) *
+                self.rlc(self.b_eval, self.s2_eval))
+        ) * self.alpha
+
+        # compute grand product is equal check
+        R_gp_equal = (self.Z - Scalar(1)) * l1_eval * self.alpha * self.alpha
+
+        # compute vanishing section
+        R_vanishing = (self.T1 + 
+            self.T2 * (zeta**self.group_order) +
+            self.T3 * (zeta**(2 * self.group_order))) * zh_eval
+
+        R = R_constraint + R_gp_comp + R_gp_equal - R_vanishing.fft()
 
         # Sanity-check R
         assert R.barycentric_eval(zeta) == 0
 
         print("Generated linearization polynomial R")
 
-        # Check that degree of W_z is not greater than n
-        assert W_z_coeffs[group_order:] == [0] * (group_order * 3)
-
-        # Check that degree of W_z is not greater than n
-        assert W_zw_coeffs[group_order:] == [0] * (group_order * 3)
-
-        # Compute W_z_1 commitment to W_z
+        # compute sum of all checks
+        check_sum = (R + 
+            (self.A - self.a_eval) * v +
+            (self.B - self.b_eval) * v**2 +
+            (self.C - self.c_eval) * v**3 + 
+            (self.pk.S1 - self.s1_eval) * v**4 +
+            (self.pk.S2 - self.s2_eval) * v**5
+        )
+        m1 = Polynomial(
+            [-self.zeta] + [Scalar(1)] + [Scalar(0)] * (self.group_order-2),
+            Basis.MONOMIAL
+        ).fft()
+        m2 = Polynomial(
+            [-self.zeta*Scalar.root_of_unity(self.group_order)] + [Scalar(1)] + [Scalar(0)] * (self.group_order-2),
+            Basis.MONOMIAL
+        ).fft()
+        W_z = self.fft_expand(check_sum) / self.fft_expand(m1)
+        W_zw = self.fft_expand(self.Z - self.z_shifted_eval) / self.fft_expand(m2)
 
         print("Generated final quotient witness polynomials")
 
+        W_z_1 = self.setup.commit(self.expanded_evals_to_coeffs(W_z))
+        W_zw_1 = self.setup.commit(self.expanded_evals_to_coeffs(W_zw))
+        
         # Return W_z_1, W_zw_1
         return Message5(W_z_1, W_zw_1)
 
@@ -221,3 +361,6 @@ class Prover:
 
     def rlc(self, term_1, term_2):
         return term_1 + term_2 * self.beta + self.gamma
+
+    def rlc_poly(self, poly_1: Polynomial, poly_2: Polynomial):
+        return poly_1 + poly_2 * self.beta + self.gamma

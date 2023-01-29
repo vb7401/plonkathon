@@ -64,14 +64,16 @@ class Setup(object):
         return cls(powers_of_x, X2)
 
     # Encodes the KZG commitment that evaluates to the given values in the group
-    def commit(self, values: Polynomial) -> G1Point:
-        assert values.basis == Basis.LAGRANGE
-
-        coeff_poly = values.ifft()
+    def commit(self, pol: Polynomial) -> G1Point:
+        assert pol.basis == Basis.LAGRANGE
+        coeff_poly = pol.ifft()
         num_coeffs = len(coeff_poly.values)
-        
         return ec_lincomb(list(zip(self.powers_of_x[:num_coeffs], coeff_poly.values)))
 
+    def commit_monomial(self, pol: Polynomial) -> G1Point:
+        assert pol.basis == Basis.MONOMIAL
+        num_coeffs = len(pol.values)
+        return ec_lincomb(list(zip(self.powers_of_x[:num_coeffs], pol.values)))
 
     # Generate the verification key for this program with the given setup
     def verification_key(self, pk: CommonPreprocessedInput, blind=False) -> VerificationKey:
