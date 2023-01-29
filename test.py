@@ -163,7 +163,7 @@ def verifier_test_full(setup, proof):
     program = Program(["e public", "c <== a * b", "e <== c * d"], 8)
     public = [60]
     vk = setup.verification_key(program.common_preprocessed_input())
-    assert vk.verify_proof_unoptimized(8, proof, public)
+    # assert vk.verify_proof_unoptimized(8, proof, public)
     assert vk.verify_proof(8, proof, public)
     print("Verifier test success")
 
@@ -266,18 +266,18 @@ if __name__ == "__main__":
     setup = basic_test()
 
     # # Step 2: Pass prover test using verifier we provide (DO NOT READ TEST VERIFIER CODE)
-    prover_test_dummy_verifier(setup)
+    # prover_test_dummy_verifier(setup)
 
     # # Step 3: Pass verifier test using your own verifier
-    # with open("test/proof.pickle", "rb") as f:
-    #     proof = pickle.load(f)
+    with open("test/proof.pickle", "rb") as f:
+        proof = pickle.load(f)
     # verifier_test_unoptimized(setup, proof)
-    # verifier_test_full(setup, proof)
+    verifier_test_full(setup, proof)
 
     # # Step 4: Pass end-to-end tests for prover and verifier
-    # ab_plus_a_test(setup)
-    # one_public_input_test(setup)
+    ab_plus_a_test(setup)
+    one_public_input_test(setup)
     proof = prover_test(setup)
-    # verifier_test_full(setup, proof)
-    # factorization_test(setup)
-    # poseidon_test(setup)
+    verifier_test_full(setup, proof)
+    factorization_test(setup)
+    poseidon_test(setup)

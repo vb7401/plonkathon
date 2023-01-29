@@ -210,14 +210,14 @@ class Prover:
         # grand product computation check
         T_gp_comp = (
             (
-                self.rlc_poly(a_big, X_big) *
-                self.rlc_poly(b_big, X_big*Scalar(2)) *
-                self.rlc_poly(c_big, X_big*Scalar(3)) *
+                self.rlc(a_big, X_big) *
+                self.rlc(b_big, X_big*Scalar(2)) *
+                self.rlc(c_big, X_big*Scalar(3)) *
                 Z_big
             ) - (
-                self.rlc_poly(a_big, S1_big) *
-                self.rlc_poly(b_big, S2_big) *
-                self.rlc_poly(c_big, S3_big) *
+                self.rlc(a_big, S1_big) *
+                self.rlc(b_big, S2_big) *
+                self.rlc(c_big, S3_big) *
                 Zw_big
             )
         ) * self.alpha;
@@ -275,19 +275,15 @@ class Prover:
     def round_5(self) -> Message5:
         zeta = self.zeta
         v = self.v
+        group_order = self.group_order
 
         # more zeta evaluations
-        zh_eval = Polynomial( 
-            [Scalar(-1)] +
-            [Scalar(0)] * (self.group_order - 1) +
-            [Scalar(1)],
-            Basis.MONOMIAL
-        ).standard_eval(zeta)
-
+        zh_eval = zeta**group_order - 1
         l1_eval = Polynomial(
-            [Scalar(1)] + [Scalar(0)] * (self.group_order - 1),
+            [Scalar(1)] + [Scalar(0)] * (group_order - 1),
             Basis.LAGRANGE
         ).barycentric_eval(zeta)
+        PI_eval = self.PI.barycentric_eval(zeta)
 
         # compute constraint part of R
         R_constraint = (
@@ -295,31 +291,34 @@ class Prover:
             self.pk.QL * self.a_eval +
             self.pk.QR * self.b_eval +
             self.pk.QO * self.c_eval +
-            self.PI + 
+            PI_eval + 
             self.pk.QC
         )
 
         # compute grand product check
+        c_eval = Polynomial([self.c_eval] * group_order, Basis.LAGRANGE)
         R_gp_comp = (
             ((self.Z) * 
                 self.rlc(self.a_eval, zeta) *
                 self.rlc(self.b_eval, 2 * zeta) *  
                 self.rlc(self.c_eval, 3 * zeta)) - 
-            ((self.pk.S3 * self.beta + self.c_eval + self.gamma) *
+            (self.rlc(c_eval, self.pk.S3) *
                 self.z_shifted_eval *
                 self.rlc(self.a_eval, self.s1_eval) *
                 self.rlc(self.b_eval, self.s2_eval))
         ) * self.alpha
 
         # compute grand product is equal check
-        R_gp_equal = (self.Z - Scalar(1)) * l1_eval * self.alpha * self.alpha
+        R_gp_equal = (self.Z - Scalar(1)) * l1_eval * (self.alpha**2)
 
         # compute vanishing section
-        R_vanishing = (self.T1 + 
-            self.T2 * (zeta**self.group_order) +
-            self.T3 * (zeta**(2 * self.group_order))) * zh_eval
+        R_vanishing = (
+            self.T1.fft() + 
+            self.T2.fft() * (zeta**group_order) +
+            self.T3.fft() * (zeta**(2 * group_order))
+        ) * zh_eval
 
-        R = R_constraint + R_gp_comp + R_gp_equal - R_vanishing.fft()
+        R = R_constraint + R_gp_comp + R_gp_equal - R_vanishing
 
         # Sanity-check R
         assert R.barycentric_eval(zeta) == 0
@@ -334,21 +333,15 @@ class Prover:
             (self.pk.S1 - self.s1_eval) * v**4 +
             (self.pk.S2 - self.s2_eval) * v**5
         )
-        m1 = Polynomial(
-            [-self.zeta] + [Scalar(1)] + [Scalar(0)] * (self.group_order-2),
-            Basis.MONOMIAL
-        ).fft()
-        m2 = Polynomial(
-            [-self.zeta*Scalar.root_of_unity(self.group_order)] + [Scalar(1)] + [Scalar(0)] * (self.group_order-2),
-            Basis.MONOMIAL
-        ).fft()
-        W_z = self.fft_expand(check_sum) / self.fft_expand(m1)
-        W_zw = self.fft_expand(self.Z - self.z_shifted_eval) / self.fft_expand(m2)
+        m1 = Polynomial([r - zeta for r in Scalar.roots_of_unity(group_order)], Basis.LAGRANGE)
+        m2 = Polynomial([r - zeta*Scalar.root_of_unity(group_order) for r in Scalar.roots_of_unity(group_order)], Basis.LAGRANGE)
+        W_z = check_sum / m1
+        W_zw = (self.Z - self.z_shifted_eval) / m2
 
         print("Generated final quotient witness polynomials")
 
-        W_z_1 = self.setup.commit(self.expanded_evals_to_coeffs(W_z))
-        W_zw_1 = self.setup.commit(self.expanded_evals_to_coeffs(W_zw))
+        W_z_1 = self.setup.commit(W_z)
+        W_zw_1 = self.setup.commit(W_zw)
         
         # Return W_z_1, W_zw_1
         return Message5(W_z_1, W_zw_1)
@@ -361,6 +354,3 @@ class Prover:
 
     def rlc(self, term_1, term_2):
         return term_1 + term_2 * self.beta + self.gamma
-
-    def rlc_poly(self, poly_1: Polynomial, poly_2: Polynomial):
-        return poly_1 + poly_2 * self.beta + self.gamma
