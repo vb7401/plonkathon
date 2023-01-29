@@ -5,6 +5,7 @@ from compiler.program import CommonPreprocessedInput
 from verifier import VerificationKey
 from dataclasses import dataclass
 from poly import Polynomial, Basis
+from math import log2, ceil
 
 # Recover the trusted setup from a file in the format used in
 # https://github.com/iden3/snarkjs#7-prepare-phase-2
@@ -66,9 +67,29 @@ class Setup(object):
     def commit(self, values: Polynomial) -> G1Point:
         assert values.basis == Basis.LAGRANGE
 
-        return NotImplemented
+        coeff_poly = values.ifft()
+        num_coeffs = len(coeff_poly.values)
+        
+        return ec_lincomb(list(zip(self.powers_of_x[:num_coeffs], coeff_poly.values)))
+
 
     # Generate the verification key for this program with the given setup
     def verification_key(self, pk: CommonPreprocessedInput) -> VerificationKey:
         # Create the appropriate VerificationKey object
-        return NotImplemented
+        vk = VerificationKey(
+            group_order = pk.group_order,
+            Qm = self.commit(pk.QM),
+            Ql = self.commit(pk.QL),
+            Qr = self.commit(pk.QR),
+            Qo = self.commit(pk.QO),
+            Qc = self.commit(pk.QC),
+            S1 = self.commit(pk.S1),
+            S2 = self.commit(pk.S2),
+            S3 = self.commit(pk.S3),
+            X_2 = self.X2,
+            w = Scalar.root_of_unity(2**ceil(log2(len(pk.QM.values))))
+        )
+
+        return vk
+ 
+        
